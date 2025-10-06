@@ -1,0 +1,366 @@
+```html
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>월별 당직 근무표</title>
+
+  <!-- XLSX CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #f7fafc;
+      --card: #fff;
+      --muted: #666;
+      --accent: #2563eb;
+      --blue: #0ea5e9;
+      --vacation-bar: #cbd5e1;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; background: var(--bg); margin: 0; }
+    .wrap { display:flex; gap:20px; padding:20px; max-width:1200px; margin:0 auto; box-sizing:border-box; }
+    .main { flex:1; }
+    header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    h1 { margin:0; font-size:1.3rem; }
+    .controls button { margin-left:6px; padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    .controls .export { background:#dcfce7; border-color:#bbf7d0; }
+    .panel { background:var(--card); padding:12px; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,0.04); margin-bottom:12px; }
+    .person-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+    .person-row input[type="text"] { padding:6px; border-radius:6px; border:1px solid #ddd; min-width:140px; }
+    .person-row button { padding:6px 8px; border-radius:6px; border:1px solid #ddd; background:#fee2e2; cursor:pointer; }
+    .vac-form { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+    .vac-form input[type="date"] { padding:6px; border-radius:6px; border:1px solid #ddd; }
+    .grid-week { display:grid; grid-template-columns: repeat(7,1fr); gap:6px; margin-bottom:6px; }
+    .weekday { text-align:center; font-weight:600; padding:6px 0; background:#f1f5f9; border-radius:6px; }
+    .calendar { display:grid; grid-template-columns: repeat(7,1fr); gap:6px; }
+    .day { background:var(--card); min-height:90px; border-radius:8px; padding:8px; border:1px solid #e5e7eb; box-sizing:border-box; position:relative; user-select:none; }
+    .day .date { font-weight:700; font-size:0.95rem; margin-bottom:6px; }
+    .assignee { display:block; padding:4px 6px; border-radius:6px; background:#f8fafc; border:1px solid #e6eef8; cursor:grab; }
+    .assignee.swapped { color: var(--blue); border-color: rgba(14,165,233,0.5); background: rgba(14,165,233,0.06); }
+    .assignee[draggable="true"] { -webkit-user-drag: element; }
+    .swap-log { max-height:640px; overflow:auto; padding:8px; background:#fff; border-radius:8px; border:1px solid #e5e7eb; }
+    .swap-item { font-size:13px; padding:8px; border-bottom:1px dashed #eef2ff; }
+    .swap-item time { color:var(--muted); font-size:12px; display:block; margin-top:6px; }
+    .vac-list { margin-top:8px; font-size:13px; }
+    .vac-item { font-size:13px; margin-bottom:6px; display:flex; justify-content:space-between; gap:8px; }
+    .tooltip { position: absolute; z-index: 50; background: #111827; color: #fff; padding:6px 8px; border-radius:6px; font-size:12px; transform: translateY(-100%); white-space:nowrap; }
+    @media (max-width: 1000px) { .wrap { flex-direction:column; } .right { width:100%; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="main">
+      <header>
+        <h1>월별 당직 근무표</h1>
+        <div class="controls">
+          <button onclick="changeYear(-1)">-1년</button>
+          <button onclick="changeMonth(-1)">이전 달</button>
+          <span id="currentLabel"></span>
+          <button onclick="changeMonth(1)">다음 달</button>
+          <button onclick="changeYear(1)">+1년</button>
+          <button class="export" onclick="exportExcel()">엑셀 내보내기</button>
+        </div>
+      </header>
+
+      <div class="panel" id="peoplePanel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong>인원 관리</strong>
+          <div>
+            <button onclick="addPerson()">인원 추가</button>
+          </div>
+        </div>
+        <div id="personRows" style="margin-top:12px;"></div>
+
+        <div style="margin-top:12px;">
+          <strong>근무 열외기간 (인원별)</strong>
+          <div class="hint">각 인원에 대해 시작일/종료일을 입력하면 해당 기간 자동 배정에서 제외됩니다.</div>
+          <div id="vacControls" style="margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="grid-week" id="weekdays"></div>
+
+        <div class="calendar" id="calendar"></div>
+      </div>
+
+      <div class="panel">
+        <strong>통계</strong>
+        <table class="stats-table" id="statsTable">
+          <thead><tr><th>이름</th><th>당직 횟수</th></tr></thead>
+          <tbody id="statsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="panel">
+        <strong>교대 기록</strong>
+        <div class="swap-log" id="swapLog">아직 교대 기록이 없습니다.</div>
+      </div>
+
+      <div class="panel">
+        <strong>설명</strong>
+        <div class="hint">
+          - 날짜 블록의 이름(당직자) 부분을 드래그하여 다른 날짜에 놓으면 두 날짜의 담당자가 서로 교대됩니다.<br>
+          - 교대된 날짜의 이름은 파란색으로 표시되며, 마우스 오버하면 누가 언제 교대했는지 표시됩니다.
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ------------------------------
+  데이터 모델
+  - persons: [{id, name}]
+  - vacations: [{personId, from:'YYYY-MM-DD', to:'YYYY-MM-DD'}]
+  - manualMap: { 'YYYY-M-D': personId }  <-- manual swaps override auto
+  - swaps: [{dateA, dateB, personA, personB, ts}]
+---------------------------------*/
+
+let persons = [
+  { id: 1, name: 'Person 1' },
+  { id: 2, name: 'Person 2' }
+];
+let nextPersonId = 3;
+
+let vacations = []; // array of {personId, from, to}
+let manualMap = {};  // dateStr -> personId (overrides auto assignment)
+let swappedDates = new Set(); // dates that have been swapped (for blue styling)
+let swaps = []; // history of swaps
+
+let year = new Date().getFullYear();
+let month = new Date().getMonth(); // 0-indexed
+
+/* ---------- helpers ---------- */
+function fmtDateObj(d) {
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const dd = d.getDate();
+  return `${y}-${m}-${dd}`;
+}
+function padYMD(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+function parseYMD(s) {
+  if(!s) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
+function daysInMonth(y, m) {
+  return new Date(y, m+1, 0).getDate();
+}
+
+/* ---------- UI render ---------- */
+
+function renderPersonsUI() {
+  const container = document.getElementById('personRows');
+  container.innerHTML = '';
+  persons.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'person-row';
+    row.innerHTML = `
+      <input type="text" value="${escapeHtml(p.name)}" data-id="${p.id}" />
+      <button data-id="${p.id}" title="삭제">삭제</button>
+      <button data-id="${p.id}" title="휴가 추가">휴가 추가</button>
+      <button data-id="${p.id}" class="swap-cancel">수동 교대 취소</button>
+      <div style="margin-left:auto; color:#666; font-size:13px;">#${p.id}</div>
+    `;
+    // name change
+    row.querySelector('input').addEventListener('input', (e) => {
+      const id = Number(e.target.dataset.id);
+      const person = persons.find(x=>x.id===id);
+      if(person) person.name = e.target.value;
+      renderAll();
+    });
+    // delete
+    row.querySelectorAll('button')[0].addEventListener('click', (e)=>{
+      const id = Number(e.target.dataset.id);
+      removePerson(id);
+    });
+    // quick add vac button opens small inputs
+    row.querySelectorAll('button')[1].addEventListener('click', (e)=>{
+      const id = Number(e.target.dataset.id);
+      openVacInputs(id);
+    });
+    // cancel swap
+    row.querySelectorAll('button')[2].addEventListener('click', (e)=>{
+      const id = Number(e.target.dataset.id);
+      cancelManualSwap(id);
+    });
+    container.appendChild(row);
+  });
+  renderVacControls();
+}
+
+function cancelManualSwap(id) {
+  for (const dateStr in manualMap) {
+    if (manualMap[dateStr] === id) {
+      delete manualMap[dateStr];
+      renderAll();
+      return;
+    }
+  }
+}
+
+function openVacInputs(personId) {
+  const container = document.getElementById('vacControls');
+  // show inline inputs for that person
+  container.innerHTML = `
+    <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+      <div style="font-weight:600;">${escapeHtml(persons.find(p=>p.id===personId).name)}</div>
+      <input id="vacFrom" type="date" />
+      <input id="vacTo" type="date" />
+      <button id="vacAddBtn">휴가 등록</button>
+      <button id="vacCancelBtn">취소</button>
+    </div>
+  `;
+  document.getElementById('vacAddBtn').onclick = ()=>{
+    const from = document.getElementById('vacFrom').value;
+    const to = document.getElementById('vacTo').value;
+    if(!from || !to) return alert('기간을 선택하세요.');
+    if(new Date(from) > new Date(to)) return alert('시작일이 종료일보다 빠릅니다.');
+    vacations.push({ personId, from, to });
+    document.getElementById('vacControls').innerHTML = '';
+    renderAll();
+  };
+  document.getElementById('vacCancelBtn').onclick = ()=>{
+    document.getElementById('vacControls').innerHTML = '';
+  };
+}
+
+function renderVacControls() {
+  const container = document.getElementById('vacControls');
+  // show list of vacations
+  if(vacations.length === 0) {
+    // nothing
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  const title = document.createElement('div');
+  title.style.marginTop = '8px';
+  title.style.fontWeight = '600';
+  title.innerText = '등록된 열외기간';
+  frag.appendChild(title);
+
+  vacations.forEach((v, i) => {
+    const div = document.createElement('div');
+    div.className = 'vac-item';
+    const pname = persons.find(p=>p.id===v.personId)?.name || (`ID ${v.personId}`);
+    div.innerHTML = `<div>${escapeHtml(pname)}: ${v.from} ~ ${v.to}</div>
+                     <div><button data-index="${i}">삭제</button></div>`;
+    div.querySelector('button').addEventListener('click', ()=>{
+      vacations.splice(i,1);
+      renderAll();
+    });
+    frag.appendChild(div);
+  });
+  container.appendChild(frag);
+}
+
+function renderWeekdays() {
+  const wk = ['일','월','화','수','목','금','토'];
+  const div = document.getElementById('weekdays');
+  div.innerHTML = '';
+  wk.forEach(w=>{
+    const x = document.createElement('div');
+    x.className = 'weekday';
+    x.innerText = w;
+    div.appendChild(x);
+  });
+}
+
+function computeAutoAssignments() {
+  // returns map dateStr -> personId
+  const total = daysInMonth(year, month);
+  const dateObjs = Array.from({length: total}, (_,i)=> new Date(year, month, i+1));
+  // build quick vacation check
+  function isOnVac(personId, dateObj) {
+    const s = padYMD(dateObj);
+    return vacations.some(v => v.personId===personId && v.from <= s && s <= v.to);
+  }
+  const counts = {};
+  persons.forEach(p => counts[p.id] = 0);
+  const res = {};
+  let prev = null;
+  for(const d of dateObjs) {
+    const dateStr = padYMD(d);
+    const candidates = persons.filter(p => !isOnVac(p.id, d));
+    if(candidates.length === 0) { res[dateStr] = null; prev = null; continue; }
+    let min = Math.min(...candidates.map(c=>counts[c.id]));
+    let pickables = candidates.filter(c=>counts[c.id]===min);
+    if(prev) {
+      const withoutPrev = pickables.filter(c=>c.id !== prev);
+      if(withoutPrev.length > 0) pickables = withoutPrev;
+    }
+    pickables.sort((a,b)=>a.id - b.id);
+    const pick = pickables[0];
+    res[dateStr] = pick.id;
+    counts[pick.id] += 1;
+    prev = pick.id;
+  }
+  return res;
+}
+
+function renderCalendar() {
+  const calendar = document.getElementById('calendar');
+  calendar.innerHTML = '';
+  const total = daysInMonth(year, month);
+  const firstWeekday = new Date(year, month, 1).getDay();
+
+  // fill blanks
+  for(let i=0;i<firstWeekday;i++){
+    const blank = document.createElement('div');
+    blank.className = 'day';
+    blank.style.background = 'transparent';
+    blank.style.border = 'none';
+    blank.style.minHeight = '40px';
+    calendar.appendChild(blank);
+  }
+
+  const auto = computeAutoAssignments();
+
+  // build personCounts to display stats later (based on effective assignment)
+  const personCounts = {};
+  persons.forEach(p => personCounts[p.id] = 0);
+
+  for(let d=1; d<=total; d++) {
+    const dateObj = new Date(year, month, d);
+    const dateKey = padYMD(dateObj);
+    // effective assignee = manualMap override else auto
+    const manual = manualMap[dateKey];
+    const assignedId = (manual !== undefined) ? manual : auto[dateKey];
+    const assignedPerson = persons.find(p=>p.id===assignedId);
+
+    const dayDiv = document.createElement('div');
+    dayDiv.className = 'day';
+    dayDiv.dataset.date = dateKey;
+
+    // date label
+    const dateLabel = document.createElement('div');
+    dateLabel.className = 'date';
+    dateLabel.innerText = `${d}일`;
+    dayDiv.appendChild(dateLabel);
+
+    // assignee area (draggable)
+    const assignee = document.createElement('div');
+    assignee.className = 'assignee';
+    assignee.draggable = true;
+    if(swappedDates.has(dateKey)) assignee.classList.add('swapped');
+
+    if(assignedPerson) {
+      assignee.innerText = assignedPerson.name;
+    } else {
+      assignee.innerText = '(가능 인원 없음)';
+      assignee.draggable = false;
+      assignee.style.opacity = 0.6;
+    }
+
+    dayDiv.appendChild(assignee);
+    calendar.appendChild(dayDiv);
+
+    if(assignedPerson) personCounts[assignedPerson.id] = (personCounts[assignedPerson.id]||0)
+```
