@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>월별 당직 근무표</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #f7fafc;
+      --card: #fff;
+      --muted: #666;
+      --accent: #2563eb;
+      --blue: #0ea5e9;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; background: var(--bg); margin: 0; }
+    .wrap { display:flex; gap:20px; padding:20px; max-width:1200px; margin:0 auto; box-sizing:border-box; }
+    .main { flex:1; }
+    header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap: 8px;}
+    h1 { margin:0; font-size:1.3rem; }
+    .header-info { display:flex; flex-direction:column; align-items:flex-start; gap: 4px; }
+    .controls { display:flex; align-items:center; flex-wrap:wrap; gap: 6px; }
+    .controls button { padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    .controls .export { background:#dcfce7; border-color:#bbf7d0; }
+    .controls .save { background:#e0e7ff; border-color:#c7d2fe; }
+    #saveTimestamp { font-size:12px; color:var(--muted); margin-left: auto;}
+    .panel { background:var(--card); padding:12px; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,0.04); margin-bottom:12px; }
+    .person-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+    .person-row input[type="text"] { padding:6px; border-radius:6px; border:1px solid #ddd; min-width:140px; }
+    .person-row button { padding:6px 8px; border-radius:6px; border:1px solid #ddd; background:#fee2e2; cursor:pointer; }
+    .vac-form { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+    .vac-form input[type="date"] { padding:6px; border-radius:6px; border:1px solid #ddd; }
+    .grid-week { display:grid; grid-template-columns: repeat(7,1fr); gap:6px; margin-bottom:6px; }
+    .weekday { text-align:center; font-weight:600; padding:6px 0; background:#f1f5f9; border-radius:6px; }
+    .calendar { display:grid; grid-template-columns: repeat(7,1fr); gap:6px; }
+    .day { background:var(--card); min-height:90px; border-radius:8px; padding:8px; border:1px solid #e5e7eb; box-sizing:border-box; position:relative; user-select:none; }
+    .day .date { font-weight:700; font-size:0.95rem; margin-bottom:6px; }
+    .assignee { display:block; padding:4px 6px; border-radius:6px; background:#f8fafc; border:1px solid #e6eef8; cursor:grab; }
+    .assignee.swapped { color: var(--blue); border-color: rgba(14,165,233,0.5); background: rgba(14,165,233,0.06); }
+    .assignee[draggable="true"] { -webkit-user-drag: element; }
+    .stats-table { width:100%; border-collapse:collapse; margin-top:8px; }
+    .stats-table th, .stats-table td { padding:8px 6px; border:1px solid #eee; text-align:left; }
+    .right { width:320px; display:flex; flex-direction:column; gap:12px; }
+    .swap-log { max-height:640px; overflow:auto; padding:8px; background:#fff; border-radius:8px; border:1px solid #e5e7eb; }
+    .swap-item { font-size:13px; padding:8px; border-bottom:1px dashed #eef2ff; }
+    .swap-item time { color:var(--muted); font-size:12px; display:block; margin-top:6px; }
+    .vac-list { margin-top:8px; font-size:13px; }
+    .vac-item { font-size:13px; margin-bottom:6px; display:flex; justify-content:space-between; gap:8px; }
+    .hint { color:var(--muted); font-size:13px; margin-top:6px; }
+    .tooltip { position: absolute; z-index: 50; background: #111827; color: #fff; padding:6px 8px; border-radius:6px; font-size:12px; transform: translateY(-100%); white-space:nowrap; }
+    @media (max-width: 1000px) { .wrap { flex-direction:column; } .right { width:100%; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="main">
+      <header>
+        <div class="header-info">
+            <h1>월별 당직 근무표</h1>
+            <div id="saveTimestamp">저장된 데이터가 없습니다.</div>
+        </div>
+        <div class="controls">
+          <button onclick="changeYear(-1)">-1년</button>
+          <button onclick="changeMonth(-1)">이전 달</button>
+          <span id="currentLabel"></span>
+          <button onclick="changeMonth(1)">다음 달</button>
+          <button onclick="changeYear(1)">+1년</button>
+          <button class="save" onclick="saveData()">저장</button>
+          <button onclick="resetData()">초기화</button>
+          <button class="export" onclick="exportExcel()">엑셀 내보내기</button>
+        </div>
+      </header>
+
+      <div class="panel" id="peoplePanel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong>인원 관리</strong>
+          <div>
+            <button onclick="addPerson()">인원 추가</button>
+          </div>
+        </div>
+        <div id="personRows" style="margin-top:12px;"></div>
+
+        <div style="margin-top:12px;">
+          <strong>근무 열외기간 (인원별)</strong>
+          <div class="hint">각 인원에 대해 시작일/종료일을 입력하면 해당 기간 자동 배정에서 제외됩니다.</div>
+          <div id="vacControls" style="margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="grid-week" id="weekdays"></div>
+
+        <div class="calendar" id="calendar"></div>
+      </div>
+
+      <div class="panel">
+        <strong>통계</strong>
+        <table class="stats-table" id="statsTable">
+          <thead><tr><th>이름</th><th>당직 횟수</th></tr></thead>
+          <tbody id="statsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="panel">
+        <strong>교대 기록</strong>
+        <div class="swap-log" id="swapLog">아직 교대 기록이 없습니다.</div>
+      </div>
+
+      <div class="panel">
+        <strong>설명</strong>
+        <div class="hint">
+          - 날짜 블록의 이름(당직자) 부분을 드래그하여 다른 날짜에 놓으면 두 날짜의 담당자가 서로 교대됩니다.<br>
+          - 교대된 날짜의 이름은 파란색으로 표시되며, 마우스 오버하면 누가 언제 교대했는지 표시됩니다.
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ------------------------------
+  데이터 모델
+  - persons: [{id, name}]
+  - vacations: [{personId, from:'YYYY-MM-DD', to:'YYYY-MM-DD'}]
+  - manualMap: { 'YYYY-M-D': personId }
+  - swaps: [{dateA, dateB, personA, personB, ts}]
+---------------------------------*/
+
+let persons = [
+  { id: 1, name: 'Person 1' },
+  { id: 2, name: 'Person 2' }
+];
+let nextPersonId = 3;
+
+let vacations = [];
+let manualMap = {};
+let swappedDates = new Set();
+let swaps = [];
+
+let year = new Date().getFullYear();
+let month = new Date().getMonth();
+
+/* ---------- helpers ---------- */
+function fmtDateObj(d) {
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const dd = d.getDate();
+  return `${y}-${m}-${dd}`;
+}
+function padYMD(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+function parseYMD(s) {
+  if(!s) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
+function daysInMonth(y, m) {
+  return new Date(y, m+1, 0).getDate();
+}
+
+/* ---------- UI render ---------- */
+
+function renderPersonsUI() {
+  const container = document.getElementById('personRows');
+  container.innerHTML = '';
+  persons.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'person-row';
+    row.innerHTML = `
+      <input type="text" value="${escapeHtml(p.name)}" data-id="${p.id}" />
+      <button data-id="${p.id}" title="삭제">삭제</button>
+      <button data-id="${p.id}" title="휴가 추가">휴가 추가</button>
+      <div style="margin-left:auto; color:#666; font-size:13px;">#${p.id}</div>
+    `;
+    // ⭐️ [수정 1] 'input' 이벤트를 'change' 이벤트로 변경
+    // 'input'은 한글 조합 중에도 발생하지만 'change'는 입력이 완료된 후 포커스를 잃을 때 발생합니다.
+    row.querySelector('input').addEventListener('change', (e) => {
+      const id = Number(e.target.dataset.id);
+      const person = persons.find(x=>x.id===id);
+      if(person) person.name = e.target.value;
+      renderAll();
+    });
+    // delete
+    row.querySelectorAll('button')[0].addEventListener('click', (e)=>{
+      const id = Number(e.target.dataset.id);
+      removePerson(id);
+    });
+    // quick add vac button opens small inputs
+    row.querySelectorAll('button')[1].addEventListener('click', (e)=>{
+      const id = Number(e.target.dataset.id);
+      openVacInputs(id);
+    });
+    container.appendChild(row);
+  });
+  renderVacControls();
+}
+
+function openVacInputs(personId) {
+  const container = document.getElementById('vacControls');
+  container.innerHTML = `
+    <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+      <div style="font-weight:600;">${escapeHtml(persons.find(p=>p.id===personId).name)}</div>
+      <input id="vacFrom" type="date" />
+      <input id="vacTo" type="date" />
+      <button id="vacAddBtn">휴가 등록</button>
+      <button id="vacCancelBtn">취소</button>
+    </div>
+  `;
+  document.getElementById('vacAddBtn').onclick = ()=>{
+    const from = document.getElementById('vacFrom').value;
+    const to = document.getElementById('vacTo').value;
+    if(!from || !to) return alert('기간을 선택하세요.');
+    if(new Date(from) > new Date(to)) return alert('시작일이 종료일보다 빠릅니다.');
+    vacations.push({ personId, from, to });
+    document.getElementById('vacControls').innerHTML = '';
+    renderAll();
+  };
+  document.getElementById('vacCancelBtn').onclick = ()=>{
+    document.getElementById('vacControls').innerHTML = '';
+  };
+}
+
+function renderVacControls() {
+  const container = document.getElementById('vacControls');
+  if(vacations.length === 0) {
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  const title = document.createElement('div');
+  title.style.marginTop = '8px';
+  title.style.fontWeight = '600';
+  title.innerText = '등록된 열외기간';
+  frag.appendChild(title);
+
+  vacations.forEach((v, i) => {
+    const div = document.createElement('div');
+    div.className = 'vac-item';
+    const pname = persons.find(p=>p.id===v.personId)?.name || (`ID ${v.personId}`);
+    div.innerHTML = `<div>${escapeHtml(pname)}: ${v.from} ~ ${v.to}</div>
+                     <div><button data-index="${i}">삭제</button></div>`;
+    div.querySelector('button').addEventListener('click', ()=>{
+      vacations.splice(i,1);
+      renderAll();
+    });
+    frag.appendChild(div);
+  });
+  container.appendChild(frag);
+}
+
+function renderWeekdays() {
+  const wk = ['일','월','화','수','목','금','토'];
+  const div = document.getElementById('weekdays');
+  div.innerHTML = '';
+  wk.forEach(w=>{
+    const x = document.createElement('div');
+    x.className = 'weekday';
+    x.innerText = w;
+    div.appendChild(x);
+  });
+}
+
+function computeAutoAssignments() {
+  const total = daysInMonth(year, month);
+  const dateObjs = Array.from({length: total}, (_,i)=> new Date(year, month, i+1));
+  function isOnVac(personId, dateObj) {
+    const s = padYMD(dateObj);
+    return vacations.some(v => v.personId===personId && v.from <= s && s <= v.to);
+  }
+  const counts = {};
+  persons.forEach(p => counts[p.id] = 0);
+  const res = {};
+  let prev = null;
+  for(const d of dateObjs) {
+    const dateStr = padYMD(d);
+    const candidates = persons.filter(p => !isOnVac(p.id, d));
+    if(candidates.length === 0) { res[dateStr] = null; prev = null; continue; }
+    let min = Math.min(...candidates.map(c=>counts[c.id]));
+    let pickables = candidates.filter(c=>counts[c.id]===min);
+    if(prev) {
+      const withoutPrev = pickables.filter(c=>c.id !== prev);
+      if(withoutPrev.length > 0) pickables = withoutPrev;
+    }
+    pickables.sort((a,b)=>a.id - b.id);
+    const pick = pickables[0];
+    res[dateStr] = pick.id;
+    counts[pick.id] += 1;
+    prev = pick.id;
+  }
+  return res;
+}
+
+function renderCalendar() {
+  const calendar = document.getElementById('calendar');
+  calendar.innerHTML = '';
+  const total = daysInMonth(year, month);
+  const firstWeekday = new Date(year, month, 1).getDay();
+
+  for(let i=0;i<firstWeekday;i++){
+    const blank = document.createElement('div');
+    blank.className = 'day';
+    blank.style.background = 'transparent';
+    blank.style.border = 'none';
+    blank.style.minHeight = '40px';
+    calendar.appendChild(blank);
+  }
+
+  const auto = computeAutoAssignments();
+  const personCounts = {};
+  persons.forEach(p => personCounts[p.id] = 0);
+
+  for(let d=1; d<=total; d++) {
+    const dateObj = new Date(year, month, d);
+    const dateKey = padYMD(dateObj);
+    const manual = manualMap[dateKey];
+    const assignedId = (manual !== undefined) ? manual : auto[dateKey];
+    const assignedPerson = persons.find(p=>p.id===assignedId);
+
+    const dayDiv = document.createElement('div');
+    dayDiv.className = 'day';
+    dayDiv.dataset.date = dateKey;
+
+    const dateLabel = document.createElement('div');
+    dateLabel.className = 'date';
+    dateLabel.innerText = `${d}일`;
+    dayDiv.appendChild(dateLabel);
+
+    const assignee = document.createElement('div');
+    assignee.className = 'assignee';
+    assignee.draggable = true;
+    if(swappedDates.has(dateKey)) assignee.classList.add('swapped');
+
+    if(assignedPerson) {
+      assignee.innerText = assignedPerson.name;
+      const related = swaps.filter(s => s.dateA === dateKey || s.dateB === dateKey);
+      if(related.length) {
+        const notes = related.map(s => {
+          const otherDate = (s.dateA === dateKey) ? s.dateB : s.dateA;
+          const otherPerson = (s.dateA === dateKey) ? s.personB : s.personA;
+          const when = new Date(s.ts).toLocaleString();
+          return `${when}: ${otherPerson} 와 교대(날짜: ${otherDate})`;
+        }).join('\\n');
+        assignee.title = notes;
+      } else {
+        assignee.title = '';
+      }
+    } else {
+      assignee.innerText = '(가능 인원 없음)';
+      assignee.draggable = false;
+      assignee.style.opacity = 0.6;
+    }
+
+    assignee.addEventListener('dragstart', (ev) => {
+      ev.dataTransfer.setData('text/plain', JSON.stringify({ date: dateKey, personId: assignedId }));
+      ev.dataTransfer.effectAllowed = 'move';
+    });
+
+    dayDiv.addEventListener('dragover', (ev) => {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      dayDiv.style.boxShadow = 'inset 0 0 0 3px rgba(37,99,235,0.07)';
+    });
+    dayDiv.addEventListener('dragleave', (ev) => {
+      dayDiv.style.boxShadow = 'none';
+    });
+    dayDiv.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      dayDiv.style.boxShadow = 'none';
+      const src = JSON.parse(ev.dataTransfer.getData('text/plain'));
+      const srcDate = src.date;
+      const srcPersonId = src.personId;
+      const tgtDate = dateKey;
+      if(srcDate === tgtDate) return;
+
+      const tgtManual = manualMap[tgtDate];
+      const autoMap = computeAutoAssignments();
+      const tgtPersonId = (tgtManual !== undefined) ? tgtManual : autoMap[tgtDate];
+
+      manualMap[srcDate] = tgtPersonId === null ? null : tgtPersonId;
+      manualMap[tgtDate] = srcPersonId === null ? null : srcPersonId;
+
+      const personA = persons.find(p=>p.id===srcPersonId)?.name || '(없음)';
+      const personB = persons.find(p=>p.id===tgtPersonId)?.name || '(없음)';
+      const ts = Date.now();
+      swaps.unshift({ dateA: srcDate, dateB: tgtDate, personA, personB, ts });
+      swappedDates.add(srcDate); swappedDates.add(tgtDate);
+
+      renderAll();
+      renderSwapLog();
+    });
+
+    dayDiv.appendChild(assignee);
+    calendar.appendChild(dayDiv);
+
+    if(assignedPerson) personCounts[assignedPerson.id] = (personCounts[assignedPerson.id]||0) + 1;
+  }
+  attachHoverTooltip();
+
+  const tbody = document.getElementById('statsBody');
+  tbody.innerHTML = '';
+  persons.forEach(p => {
+    const tr = document.createElement('tr');
+    const td1 = document.createElement('td'); td1.innerText = p.name;
+    const td2 = document.createElement('td'); td2.innerText = personCounts[p.id] || 0;
+    tr.appendChild(td1); tr.appendChild(td2);
+    tbody.appendChild(tr);
+  });
+}
+
+function attachHoverTooltip() {
+  let tooltip = document.getElementById('__tooltip__');
+  if(!tooltip) {
+    tooltip = document.createElement('div'); tooltip.id = '__tooltip__'; tooltip.className = 'tooltip'; tooltip.style.display='none';
+    document.body.appendChild(tooltip);
+  }
+
+  document.querySelectorAll('.assignee').forEach(node => {
+    node.onmouseenter = (ev) => {
+      const title = node.title || '';
+      if(!title) return;
+      tooltip.innerText = title;
+      tooltip.style.display = 'block';
+      const rect = node.getBoundingClientRect();
+      tooltip.style.left = (rect.left) + 'px';
+      tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + 'px';
+    };
+    node.onmousemove = (ev) => {
+      const rect = node.getBoundingClientRect();
+      tooltip.style.left = (rect.left) + 'px';
+      tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + 'px';
+    };
+    node.onmouseleave = () => {
+      tooltip.style.display = 'none';
+    };
+  });
+}
+
+function renderSwapLog() {
+  const container = document.getElementById('swapLog');
+  container.innerHTML = '';
+  if(swaps.length === 0) {
+    container.innerText = '아직 교대 기록이 없습니다.';
+    return;
+  }
+  swaps.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'swap-item';
+    const when = new Date(s.ts).toLocaleString();
+    div.innerHTML = `<div><strong>${s.personA}</strong> ⇄ <strong>${s.personB}</strong></div>
+                     <time>${when}</time>
+                     <div style="font-size:13px; color:#444; margin-top:6px;">${s.dateA} ↔ ${s.dateB}</div>`;
+    container.appendChild(div);
+  });
+}
+
+/* ---------- controls ---------- */
+
+function renderAll() {
+  document.getElementById('currentLabel').innerText = `${year}년 ${month+1}월`;
+  renderPersonsUI();
+  renderWeekdays();
+  renderCalendar();
+  renderVacControls();
+  renderSwapLog();
+  updateSaveTimestampUI();
+}
+
+function addPerson() {
+  persons.push({ id: nextPersonId++, name: `Person ${nextPersonId-1}` });
+  renderAll();
+}
+function removePerson(id) {
+  if(persons.length <= 1) return alert('최소 1명은 필요합니다.');
+  persons = persons.filter(p=>p.id !== id);
+  vacations = vacations.filter(v=>v.personId !== id);
+  for(const k of Object.keys(manualMap)) {
+    if(manualMap[k] === id) delete manualMap[k];
+  }
+  renderAll();
+}
+
+function changeMonth(diff) {
+  month += diff;
+  if(month < 0) { month = 11; year -= 1; }
+  if(month > 11) { month = 0; year += 1; }
+  renderAll();
+}
+function changeYear(diff) {
+  year += diff;
+  renderAll();
+}
+
+/* ---------- export ---------- */
+
+function exportExcel() {
+  const total = daysInMonth(year, month);
+  const auto = computeAutoAssignments();
+  const rows = [];
+  for(let d=1; d<=total; d++) {
+    const dateObj = new Date(year, month, d);
+    const key = padYMD(dateObj);
+    const manual = manualMap[key];
+    const assignedId = (manual !== undefined) ? manual : auto[key];
+    const assignedName = persons.find(p=>p.id===assignedId)?.name || '(없음)';
+    rows.push({ 날짜: key, 당직자: assignedName });
+  }
+  const counts = {};
+  persons.forEach(p=>counts[p.name]=0);
+  rows.forEach(r => { if(counts[r.당직자] !== undefined) counts[r.당직자]++; });
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws1, '당직표');
+
+  const statsRows = Object.entries(counts).map(([name, cnt])=>({ 이름:name, 당직횟수:cnt }));
+  const ws2 = XLSX.utils.json_to_sheet(statsRows);
+  XLSX.utils.book_append_sheet(wb, ws2, '통계');
+
+  XLSX.writeFile(wb, `${year}_${month+1}_당직근무표.xlsx`);
+}
+
+/* ---------- simple escaping ---------- */
+function escapeHtml(s) {
+  return (s+'').replace(/[&<>"']/g, (m)=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+}
+
+/* ------------------------------------------
+  ⭐️ [수정 2] 저장/불러오기 기능 추가
+------------------------------------------ */
+const STORAGE_KEY = 'dutyRosterData';
+const TIMESTAMP_KEY = 'dutyRosterSaveTime';
+
+function saveData() {
+  const state = {
+    persons,
+    nextPersonId,
+    vacations,
+    manualMap,
+    swappedDates: Array.from(swappedDates), // Set을 Array로 변환하여 저장
+    swaps,
+    year,
+    month
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(TIMESTAMP_KEY, new Date().toISOString());
+  alert('데이터가 저장되었습니다.');
+  updateSaveTimestampUI();
+}
+
+function loadData() {
+  const savedData = localStorage.getItem(STORAGE_KEY);
+  if (savedData) {
+    try {
+      const parsedData = JSON.parse(savedData);
+      persons = parsedData.persons || persons;
+      nextPersonId = parsedData.nextPersonId || nextPersonId;
+      vacations = parsedData.vacations || vacations;
+      manualMap = parsedData.manualMap || manualMap;
+      swappedDates = new Set(parsedData.swappedDates || []); // Array를 Set으로 복원
+      swaps = parsedData.swaps || swaps;
+      year = parsedData.year || year;
+      month = parsedData.month || month;
+    } catch (e) {
+      console.error("저장된 데이터를 불러오는 데 실패했습니다.", e);
+      alert("오류: 저장된 데이터를 불러올 수 없습니다. 데이터를 초기화합니다.");
+      resetData();
+    }
+  }
+}
+
+function updateSaveTimestampUI() {
+    const timestampElem = document.getElementById('saveTimestamp');
+    const savedTime = localStorage.getItem(TIMESTAMP_KEY);
+    if (savedTime) {
+        timestampElem.textContent = `마지막 저장: ${new Date(savedTime).toLocaleString()}`;
+    } else {
+        timestampElem.textContent = '저장된 데이터가 없습니다.';
+    }
+}
+
+function resetData() {
+    if (confirm('정말로 모든 데이터를 초기화하시겠습니까? 저장된 인원, 휴가, 교대 기록이 모두 사라집니다.')) {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(TIMESTAMP_KEY);
+        // 페이지를 새로고침하여 초기 상태로 돌아감
+        window.location.reload();
+    }
+}
+
+/* ---------- init ---------- */
+loadData(); // 페이지 로드 시 저장된 데이터 불러오기
+renderAll();
+
+</script>
+</body>
+</html>
